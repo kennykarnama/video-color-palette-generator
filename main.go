@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"image"
 	"log"
 	"math"
 	"os"
@@ -56,7 +57,11 @@ func main() {
 		if frameCount <= frameCountsPerSegment {
 			frameFileName := filepath.Join(outputFolder, fmt.Sprintf("frame_%v__segment_%v.png", frameCount, period+1))
 			log.Printf("writing file=%v", frameFileName)
-			writeStatus := gocv.IMWriteWithParams(frameFileName, videoFrame, []int{gocv.IMWritePngStrategy})
+			// scale frame
+			scaledVideoFrame := gocv.NewMat()
+			gocv.Resize(videoFrame, &scaledVideoFrame, image.Point{X: 0, Y: 0}, 0.1, 0.1, gocv.InterpolationCubic)
+			writeStatus := gocv.IMWriteWithParams(frameFileName, scaledVideoFrame, []int{gocv.IMWritePngStrategy})
+			scaledVideoFrame.Close()
 			if !writeStatus {
 				log.Fatalf("Error write file=%v", frameFileName)
 			}
