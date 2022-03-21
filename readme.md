@@ -14,3 +14,12 @@ Generates color palette of a given video. Using k-means for clustering the color
 
 [5] : Iteration of k-means. Default: 300
 
+```shell
+go run .\main.go .\t1.mp4 10 frames_output 6 300
+```
+
+
+
+
+
+
