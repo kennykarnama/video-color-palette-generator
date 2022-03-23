@@ -28,3 +28,4 @@ localconfig.json
 *.env
 *.png
 *.mp4
+*.csv

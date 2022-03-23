@@ -11,35 +11,81 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
-	"strconv"
+
+	"gitlab.com/ruangguru/kennykarnama/video-color-palette-generator/ffprobe"
+
+	"github.com/gocarina/gocsv"
 
 	"github.com/mccutchen/palettor"
 
+	"time"
+
+	"github.com/alexflint/go-arg"
 	gim "github.com/ozankasikci/go-image-merge"
+	"github.com/satori/go.uuid"
 	"gocv.io/x/gocv"
 )
 
-type ColorPalette struct {
-	Color  color.Color
-	Weight float64
+type Result struct {
+	SourceSerial          string  `csv:"source_serial"`
+	SourceURL             string  `csv:"source_url"`
+	SourceDurationSeconds float64 `csv:"source_duration_seconds"`
+	SourceFPS             float64 `csv:"source_fps"`
+	SampleID              string  `csv:"sample_id"`
+	SampleNumber          int     `csv:"sample_number"`
+	SampleDuration        float64 `csv:"sample_duration"`
+	PaletteID             string  `csv:"palette_id"`
+	PaletteCounts         int     `csv:"palette_counts"`
+	R                     uint32  `csv:"r"`
+	G                     uint32  `csv:"g"`
+	B                     uint32  `csv:"b"`
+	A                     uint32  `csv:"a"`
+	RNorm                 float64 `csv:"r_norm"`
+	GNorm                 float64 `csv:"g_norm"`
+	BNorm                 float64 `csv:"b_norm"`
+	Weight                float64 `csv:"weight"`
+}
+
+func (r *Result) Normalize16BitRGB() {
+	r.RNorm = float64(r.R) / 65535.0
+	r.GNorm = float64(r.G) / 65535.0
+	r.BNorm = float64(r.B) / 65535.0
+}
+
+var args struct {
+	InputFile      string         `arg:"required,--input-file,-i" help:"input file path for video"`
+	PeriodDuration float64        `arg:"required,--period-duration,-d" help:"period duration in seconds"`
+	PaletteSize    int            `arg:"required,--palette-size,-k" help:"palette size"`
+	MaxIteration   int            `arg:"--max-iteration" default:"300" help:"maximum iteration of k-means if not convergent"`
+	CsvResult      string         `arg:"required,--csv-result,-o" help:"csv result path"`
+	VisualizeCmd   *VisualizeArgs `arg:"subcommand:visualize"`
+}
+
+type VisualizeArgs struct {
+	OutputFolder string `arg:"--visualize-output-folder" help:"visualization output folder. Contains frame and color palette"`
 }
 
 func main() {
 	// parse args
-	videoFilePath := os.Args[1]
+	arg.MustParse(&args)
 
-	segmentDurationSeconds, err := strconv.ParseFloat(os.Args[2], 64)
-	if err != nil {
-		panic(err)
+	videoFilePath := args.InputFile
+
+	segmentDurationSeconds := args.PeriodDuration
+
+	paletteSize := args.PaletteSize
+
+	iteration := args.MaxIteration
+
+	resultFilePath := args.CsvResult
+
+	outputFolder := ""
+
+	if args.VisualizeCmd != nil {
+		outputFolder = args.VisualizeCmd.OutputFolder
+
+		os.MkdirAll(outputFolder, os.ModePerm)
 	}
-
-	outputFolder := os.Args[3]
-
-	os.MkdirAll(outputFolder, os.ModePerm)
-
-	paletteSize, _ := strconv.ParseInt(os.Args[4], 10, 32)
-
-	iteration, _ := strconv.ParseInt(os.Args[5], 10, 32)
 
 	vc, err := gocv.VideoCaptureFile(videoFilePath)
 	if err != nil {
@@ -47,17 +93,37 @@ func main() {
 	}
 	defer vc.Close()
 
-	videoFps := vc.Get(gocv.VideoCaptureFPS)
+	prober, err := ffprobe.NewFfprobe(videoFilePath)
+	if err != nil {
+		panic(err)
+	}
+
+	videoFps := prober.GetVideoFps()
+	videoDuration := prober.GetDuration().Seconds()
 	frameCountsPerSegment := math.Ceil(videoFps * segmentDurationSeconds)
 
 	log.Printf("FPS=%v", videoFps)
 	log.Printf("FrameCountsPerSegment=%v", frameCountsPerSegment)
+	log.Printf("durationSeconds=%v", videoDuration)
 
 	videoFrame := gocv.NewMat()
 	defer videoFrame.Close()
 
 	frameCount := float64(0)
 	period := 0
+	periodID := uuid.NewV4().String()
+
+	var results []*Result
+
+	f, err := os.OpenFile(resultFilePath, os.O_APPEND|os.O_WRONLY|os.O_CREATE, 0600)
+	if err != nil {
+		log.Fatalf("%v", err)
+	}
+	defer f.Close()
+
+	defer timeTrack(time.Now(), "video-color-palette-extraction")
+
+	start := time.Now()
 
 	for {
 		if ok := vc.Read(&videoFrame); !ok {
@@ -72,15 +138,10 @@ func main() {
 		frameCount++
 
 		if frameCount <= frameCountsPerSegment {
-			frameFileName := filepath.Join(outputFolder, fmt.Sprintf("frame_%v__segment_%v.png", frameCount, period+1))
-			log.Printf("writing file=%v", frameFileName)
 			// scale frame
 			scaledVideoFrame := gocv.NewMat()
 			gocv.Resize(videoFrame, &scaledVideoFrame, image.Point{X: 0, Y: 0}, 0.1, 0.1, gocv.InterpolationCubic)
-			writeStatus := gocv.IMWriteWithParams(frameFileName, videoFrame, []int{gocv.IMWritePngStrategy})
-			if !writeStatus {
-				log.Fatalf("Error write file=%v", frameFileName)
-			}
+
 			// generate palette
 			tmpImage, err := scaledVideoFrame.ToImage()
 			if err != nil {
@@ -90,7 +151,6 @@ func main() {
 			if err != nil {
 				log.Fatalf("Palettor err=%v", err)
 			}
-			colorPalette := []*ColorPalette{}
 
 			colors := p.Colors()
 
@@ -98,33 +158,63 @@ func main() {
 				return p.Weight(colors[i]) < p.Weight(colors[j])
 			})
 
-			for _, color := range colors {
-				log.Printf("color: %v; weight: %v", color, p.Weight(color))
-				colorPalette = append(colorPalette, &ColorPalette{
-					Color:  color,
-					Weight: p.Weight(color),
-				})
-			}
+			if args.VisualizeCmd != nil {
+				frameFileName := filepath.Join(outputFolder, fmt.Sprintf("frame_%v__segment_%v.png", frameCount, period+1))
+				log.Printf("writing file=%v", frameFileName)
+				writeStatus := gocv.IMWriteWithParams(frameFileName, videoFrame, []int{gocv.IMWritePngStrategy})
+				if !writeStatus {
+					log.Fatalf("Error write file=%v", frameFileName)
+				}
+				paletteFileName := filepath.Join(outputFolder, fmt.Sprintf("palette_%v__segment_%v.png", frameCount, period+1))
+				log.Printf("writing palette file=%v", paletteFileName)
 
-			paletteFileName := filepath.Join(outputFolder, fmt.Sprintf("palette_%v__segment_%v.png", frameCount, period+1))
-			log.Printf("writing palette file=%v", paletteFileName)
+				_, err = createPalette(paletteFileName, p.Colors())
+				if err != nil {
+					log.Fatalf("err=%v", err)
+				}
 
-			_, err = createPalette(paletteFileName, p.Colors())
-			if err != nil {
-				log.Fatalf("err=%v", err)
-			}
-
-			visualizeFileName := filepath.Join(outputFolder, fmt.Sprintf("visualize_%v__segment_%v.png", frameCount, period+1))
-			// merge frame and palette to allow better visualization
-			err = visualize(frameFileName, paletteFileName, visualizeFileName)
-			if err != nil {
-				log.Fatalf("err=%v", err)
+				visualizeFileName := filepath.Join(outputFolder, fmt.Sprintf("visualize_%v__segment_%v.png", frameCount, period+1))
+				// merge frame and palette to allow better visualization
+				err = visualize(frameFileName, paletteFileName, visualizeFileName)
+				if err != nil {
+					log.Fatalf("err=%v", err)
+				}
+				os.Remove(frameFileName)
+				os.Remove(paletteFileName)
 			}
 
 			scaledVideoFrame.Close()
+			paletteID := uuid.NewV4().String()
+			for _, clr := range colors {
+				result := &Result{
+					SourceURL:             videoFilePath,
+					SourceSerial:          "",
+					SourceDurationSeconds: videoDuration,
+					SourceFPS:             videoFps,
+					SampleID:              periodID,
+					SampleNumber:          period + 1,
+					SampleDuration:        segmentDurationSeconds,
+					PaletteCounts:         paletteSize,
+					PaletteID:             paletteID,
+				}
+				result.R, result.G, result.B, result.A = clr.RGBA()
+				result.Weight = p.Weight(clr)
+				result.Normalize16BitRGB()
+				results = append(results, result)
+			}
+
 		} else {
+			elapsed := time.Since(start)
+			log.Printf("Segment: %d took %s", period+1, elapsed)
+			start = time.Now()
 			frameCount = 0
 			period++
+			err = gocsv.MarshalFile(results, f)
+			if err != nil {
+				log.Fatalf("%v", err)
+			}
+			results = []*Result{}
+			periodID = uuid.NewV4().String()
 		}
 	}
 
@@ -172,4 +262,9 @@ func visualize(videoFramePath string, palettePath string, out string) error {
 		return fmt.Errorf("action=visualize video_frame_path=%v palette_path=%v err=%v", videoFramePath, palettePath, err)
 	}
 	return nil
+}
+
+func timeTrack(start time.Time, name string) {
+	elapsed := time.Since(start)
+	log.Printf("%s took %s", name, elapsed)
 }
