@@ -122,30 +122,52 @@ func main() {
 
 	start := time.Now()
 
-	for {
-		if ok := vc.Read(&videoFrame); !ok {
-			log.Printf("Video frame closed")
-			return
-		}
-		if videoFrame.Empty() {
-			log.Printf("Video frame empty")
-			continue
-		}
-		frameNumber := vc.Get(gocv.VideoCapturePosFrames)
+	var desiredIdx float64
+	totalFrames := vc.Get(gocv.VideoCaptureFrameCount)
 
-		frameCount++
+	for desiredIdx = float64(0); desiredIdx < totalFrames; desiredIdx += frameCountsPerSegment {
+		// frameNumber to time ms
+		frameTimeMs := (desiredIdx / videoFps) * 1000
 
-		if math.Mod(frameNumber, frameCountsPerSegment) == 0 {
-			start = time.Now()
+		vc.Set(gocv.VideoCapturePosMsec, frameTimeMs)
+		
+		var tmpImage image.Image
+		var err error
+		var imageExist bool
+
+		start = time.Now()
+		
+		for {
+			if ok := vc.Read(&videoFrame); !ok {
+				log.Printf("Video frame closed")
+				break
+			}
+			if videoFrame.Empty() {
+				log.Printf("Video frame empty")
+				continue
+			}
+
+			imageExist = true
+
 			// scale frame
 			scaledVideoFrame := gocv.NewMat()
 			gocv.Resize(videoFrame, &scaledVideoFrame, image.Point{X: 0, Y: 0}, 0.1, 0.1, gocv.InterpolationCubic)
-
+			
 			// generate palette
-			tmpImage, err := scaledVideoFrame.ToImage()
+			tmpImage, err = scaledVideoFrame.ToImage()
 			if err != nil {
+				scaledVideoFrame.Close()
 				log.Fatalf("Error convert Mat to image err=%v", err)
 			}
+			scaledVideoFrame.Close()
+			break
+		}
+
+
+		frameCount++
+
+		if imageExist {
+
 			p, err := palettor.Extract(int(paletteSize), int(iteration), tmpImage)
 			if err != nil {
 				log.Fatalf("Palettor err=%v", err)
@@ -181,8 +203,6 @@ func main() {
 				os.Remove(frameFileName)
 				os.Remove(paletteFileName)
 			}
-
-			scaledVideoFrame.Close()
 			paletteID := uuid.NewV4().String()
 			period++
 			periodID := uuid.NewV4().String()
