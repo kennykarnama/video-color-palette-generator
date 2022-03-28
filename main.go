@@ -100,7 +100,7 @@ func main() {
 
 	videoFps := prober.GetVideoFps()
 	videoDuration := prober.GetDuration().Seconds()
-	frameCountsPerSegment := math.Ceil(videoFps * segmentDurationSeconds)
+	frameCountsPerSegment := math.Floor(videoFps * segmentDurationSeconds)
 
 	log.Printf("FPS=%v", videoFps)
 	log.Printf("FrameCountsPerSegment=%v", frameCountsPerSegment)
@@ -111,9 +111,6 @@ func main() {
 
 	frameCount := float64(0)
 	period := 0
-	periodID := uuid.NewV4().String()
-
-	var results []*Result
 
 	f, err := os.OpenFile(resultFilePath, os.O_APPEND|os.O_WRONLY|os.O_CREATE, 0600)
 	if err != nil {
@@ -134,10 +131,12 @@ func main() {
 			log.Printf("Video frame empty")
 			continue
 		}
+		frameNumber := vc.Get(gocv.VideoCapturePosFrames)
 
 		frameCount++
 
-		if frameCount <= frameCountsPerSegment {
+		if math.Mod(frameNumber, frameCountsPerSegment) == 0 {
+			start = time.Now()
 			// scale frame
 			scaledVideoFrame := gocv.NewMat()
 			gocv.Resize(videoFrame, &scaledVideoFrame, image.Point{X: 0, Y: 0}, 0.1, 0.1, gocv.InterpolationCubic)
@@ -185,6 +184,9 @@ func main() {
 
 			scaledVideoFrame.Close()
 			paletteID := uuid.NewV4().String()
+			period++
+			periodID := uuid.NewV4().String()
+			var results []*Result
 			for _, clr := range colors {
 				result := &Result{
 					SourceURL:             videoFilePath,
@@ -192,9 +194,9 @@ func main() {
 					SourceDurationSeconds: videoDuration,
 					SourceFPS:             videoFps,
 					SampleID:              periodID,
-					SampleNumber:          period + 1,
+					SampleNumber:          period,
 					SampleDuration:        segmentDurationSeconds,
-					PaletteCounts:         paletteSize,
+					PaletteCounts:         len(colors),
 					PaletteID:             paletteID,
 				}
 				result.R, result.G, result.B, result.A = clr.RGBA()
@@ -202,21 +204,25 @@ func main() {
 				result.Normalize16BitRGB()
 				results = append(results, result)
 			}
-
-		} else {
-			elapsed := time.Since(start)
-			log.Printf("Segment: %d took %s", period+1, elapsed)
-			start = time.Now()
-			frameCount = 0
-			period++
-			err = gocsv.MarshalFile(results, f)
-			if err != nil {
-				log.Fatalf("%v", err)
+			if period == 1 {
+				// write csv
+				err = gocsv.MarshalFile(results, f)
+				if err != nil {
+					log.Fatalf("%v", err)
+				}
+			}else {
+				// write csv
+				err = gocsv.MarshalWithoutHeaders(results, f)
+				if err != nil {
+					log.Fatalf("%v", err)
+				}
 			}
-			results = []*Result{}
-			periodID = uuid.NewV4().String()
+			elapsed := time.Since(start)
+			log.Printf("Segment: %d k=%v took=%s", period, len(colors), elapsed)
+
 		}
 	}
+
 
 }
 
