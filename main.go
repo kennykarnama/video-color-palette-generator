@@ -10,13 +10,10 @@ import (
 	"math"
 	"os"
 	"path/filepath"
-	"sort"
 
 	"gitlab.com/ruangguru/kennykarnama/video-color-palette-generator/ffprobe"
 
 	"github.com/gocarina/gocsv"
-
-	"github.com/mccutchen/palettor"
 
 	"time"
 
@@ -24,6 +21,7 @@ import (
 	gim "github.com/ozankasikci/go-image-merge"
 	"github.com/satori/go.uuid"
 	"gocv.io/x/gocv"
+	ct "github.com/kennykarnama/color-thief"
 )
 
 type Result struct {
@@ -43,7 +41,6 @@ type Result struct {
 	RNorm                 float64 `csv:"r_norm"`
 	GNorm                 float64 `csv:"g_norm"`
 	BNorm                 float64 `csv:"b_norm"`
-	Weight                float64 `csv:"weight"`
 }
 
 func (r *Result) Normalize16BitRGB() {
@@ -56,7 +53,7 @@ var args struct {
 	InputFile      string         `arg:"required,--input-file,-i" help:"input file path for video"`
 	PeriodDuration float64        `arg:"required,--period-duration,-d" help:"period duration in seconds"`
 	PaletteSize    int            `arg:"required,--palette-size,-k" help:"palette size"`
-	MaxIteration   int            `arg:"--max-iteration" default:"300" help:"maximum iteration of k-means if not convergent"`
+	FunctionType   int `arg:"required,--function-type" help:"function type. 0 --> quant_wu, 1 --> WSM_WU"`
 	CsvResult      string         `arg:"required,--csv-result,-o" help:"csv result path"`
 	VisualizeCmd   *VisualizeArgs `arg:"subcommand:visualize"`
 }
@@ -74,8 +71,6 @@ func main() {
 	segmentDurationSeconds := args.PeriodDuration
 
 	paletteSize := args.PaletteSize
-
-	iteration := args.MaxIteration
 
 	resultFilePath := args.CsvResult
 
@@ -100,11 +95,13 @@ func main() {
 
 	videoFps := prober.GetVideoFps()
 	videoDuration := prober.GetDuration().Seconds()
+	videoDurationMs := prober.GetDuration().Milliseconds()
 	frameCountsPerSegment := math.Floor(videoFps * segmentDurationSeconds)
 
 	log.Printf("FPS=%v", videoFps)
 	log.Printf("FrameCountsPerSegment=%v", frameCountsPerSegment)
 	log.Printf("durationSeconds=%v", videoDuration)
+	log.Printf("durationMs=%v", videoDurationMs)
 
 	videoFrame := gocv.NewMat()
 	defer videoFrame.Close()
@@ -123,13 +120,11 @@ func main() {
 	start := time.Now()
 
 	var desiredIdx float64
-	totalFrames := vc.Get(gocv.VideoCaptureFrameCount)
+	//totalFrames := vc.Get(gocv.VideoCaptureFrameCount)
 
-	for desiredIdx = float64(0); desiredIdx < totalFrames; desiredIdx += frameCountsPerSegment {
-		// frameNumber to time ms
-		frameTimeMs := (desiredIdx / videoFps) * 1000
+	for desiredIdx = float64(0); desiredIdx <= float64(videoDurationMs); desiredIdx += (segmentDurationSeconds * 1000) {
 
-		vc.Set(gocv.VideoCapturePosMsec, frameTimeMs)
+		vc.Set(gocv.VideoCapturePosMsec, desiredIdx)
 		
 		var tmpImage image.Image
 		var err error
@@ -168,16 +163,10 @@ func main() {
 
 		if imageExist {
 
-			p, err := palettor.Extract(int(paletteSize), int(iteration), tmpImage)
+			colors, err := ct.GetPalette(tmpImage, int(paletteSize), args.FunctionType)
 			if err != nil {
 				log.Fatalf("Palettor err=%v", err)
 			}
-
-			colors := p.Colors()
-
-			sort.Slice(colors, func(i, j int) bool {
-				return p.Weight(colors[i]) < p.Weight(colors[j])
-			})
 
 			if args.VisualizeCmd != nil {
 				frameFileName := filepath.Join(outputFolder, fmt.Sprintf("frame_%v__segment_%v.png", frameCount, period+1))
@@ -189,7 +178,7 @@ func main() {
 				paletteFileName := filepath.Join(outputFolder, fmt.Sprintf("palette_%v__segment_%v.png", frameCount, period+1))
 				log.Printf("writing palette file=%v", paletteFileName)
 
-				_, err = createPalette(paletteFileName, p.Colors())
+				_, err = createPalette(paletteFileName, colors)
 				if err != nil {
 					log.Fatalf("err=%v", err)
 				}
@@ -203,6 +192,7 @@ func main() {
 				os.Remove(frameFileName)
 				os.Remove(paletteFileName)
 			}
+
 			paletteID := uuid.NewV4().String()
 			period++
 			periodID := uuid.NewV4().String()
@@ -220,7 +210,6 @@ func main() {
 					PaletteID:             paletteID,
 				}
 				result.R, result.G, result.B, result.A = clr.RGBA()
-				result.Weight = p.Weight(clr)
 				result.Normalize16BitRGB()
 				results = append(results, result)
 			}
