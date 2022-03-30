@@ -29,3 +29,5 @@ localconfig.json
 *.png
 *.mp4
 *.csv
+
+video-color-palette-generator
