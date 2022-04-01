@@ -82,7 +82,7 @@ func Run(args Parameter) error {
 
 	var desiredIdx float64
 	//totalFrames := vc.Get(gocv.VideoCaptureFrameCount)
-
+	
 	for desiredIdx = float64(0); desiredIdx <= float64(videoDurationMs); desiredIdx += (segmentDurationSeconds * 1000) {
 
 		vc.Set(gocv.VideoCapturePosMsec, desiredIdx)
