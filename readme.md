@@ -2,6 +2,30 @@
 
 Generates color palette of a given video. Using k-means for clustering the color of video frames.
 
+This tool has two modes:
+
+- lambdaHandler
+- script
+
+# Modes
+
+## Lambbda
+
+As lambda, this tool introduces two phases:
+
+- parse lambda event request
+- run `processor (script)`
+
+### Lambda Deployment
+
+For deployment to lambda, you'll need to build docker image
+
+Follow steps explained here: https://docs.aws.amazon.com/AmazonECR/latest/userguide/docker-push-ecr-image.html
+
+Then you need to create lambda function from docker image explained here: https://docs.aws.amazon.com/lambda/latest/dg/images-create.html
+
+## Script
+
 The output of this tool is a csv with the following structure
 
 ```
@@ -32,55 +56,16 @@ type Result struct {
 }
 ```
 
-## Args
+### Args
 
-```
-Usage: video-color-palette-generator.exe --input-file INPUT-FILE --period-duration PERIOD-DURATION --palette-size PALETTE-SIZE [--max-iteration MAX-ITERATION] --csv-result CSV-RESULT <command> [<args>]
+For args, please run `./video-color-palette-generator script --help`
 
-Options:
-  --input-file INPUT-FILE, -i INPUT-FILE
-                         input file path for video
-  --period-duration PERIOD-DURATION, -d PERIOD-DURATION
-                         period duration in seconds
-  --palette-size PALETTE-SIZE, -k PALETTE-SIZE
-                         palette size
-  --max-iteration MAX-ITERATION
-                         maximum iteration of k-means if not convergent [default: 300]
-  --csv-result CSV-RESULT, -o CSV-RESULT
-                         csv result path
-  --help, -h             display this help and exit
+# Thanks
 
-Commands:
-  visualize
-```
+Big thanks for open source project here:
 
-### Visualize command
-
-```
-Usage: video-color-palette-generator.exe visualize [--visualize-output-folder VISUALIZE-OUTPUT-FOLDER]
-
-Options:
-  --visualize-output-folder VISUALIZE-OUTPUT-FOLDER
-                         visualization output folder. Contains frame and color palette
-
-Global options:
-  --input-file INPUT-FILE, -i INPUT-FILE
-                         input file path for video
-  --period-duration PERIOD-DURATION, -d PERIOD-DURATION
-                         period duration in seconds
-  --palette-size PALETTE-SIZE, -k PALETTE-SIZE
-                         palette size
-  --max-iteration MAX-ITERATION
-                         maximum iteration of k-means if not convergent [default: 300]
-  --csv-result CSV-RESULT, -o CSV-RESULT
-                         csv result path
-  --help, -h             display this help and exit
-```
-
-```shell
-go run .\main.go .\t1.mp4 10 frames_output 6 300
-```
-
+- https://github.com/hybridgroup/gocv
+- https://github.com/zluo01/color-thief
 
 
 
