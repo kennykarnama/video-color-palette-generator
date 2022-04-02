@@ -10,5 +10,5 @@ func GetProvider(sourceURI string) (Provider, error) {
 		log.Printf("GetProvider.s3 err=%v", err)
 		return s3Source, nil
 	}
-	return nil, fmt.Errorf("GetProvider err=undefined sourceURI")
+	return nil, fmt.Errorf("GetProvider sourceURI=%v err=undefined sourceURI", sourceURI)
 }

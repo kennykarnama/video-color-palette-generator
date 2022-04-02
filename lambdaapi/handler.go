@@ -5,11 +5,15 @@ import (
 
 	"github.com/kennykarnama/video-color-palette-generator/source"
 	"github.com/kennykarnama/video-color-palette-generator/processor"
+	"github.com/kennykarnama/video-color-palette-generator/destination"
 
 	"encoding/json"
 	"net/http"
 	"fmt"
 	"context"
+	"time"
+	"os"
+	"log"
 )
 
 func Handler(req events.APIGatewayProxyRequest) (*events.APIGatewayProxyResponse, error) {
@@ -45,12 +49,21 @@ func PostHandler(req events.APIGatewayProxyRequest) (*events.APIGatewayProxyResp
 			ErrorMessage: err.Error(),
 		})
 	}
+	csvOut := fmt.Sprintf("%v.csv", time.Now().UTC().Unix())
 	param := processor.Parameter{}
 	param.InputFile = localURI
 	param.InputSerial = paletteGenReq.SourceSerial
 	param.PeriodDuration = paletteGenReq.PeriodSeconds
 	param.PaletteSize = paletteGenReq.PaletteSize
 	param.FunctionType = paletteGenReq.FunctionType
+	param.CsvResult = csvOut
+
+	defer func() {
+		for _, f := range []string{csvOut, localURI} {
+			log.Printf("Remove file: %v", f)
+			os.Remove(f)
+		}
+	}()
 
 	err = processor.Run(param)
 	if err != nil {
@@ -59,7 +72,30 @@ func PostHandler(req events.APIGatewayProxyRequest) (*events.APIGatewayProxyResp
 		})
 	}
 
-	return apiResponse(http.StatusOK, struct{}{}) 
+	// upload to destination source
+	destinationHandler, err := destination.GetTarget(paletteGenReq.DestinationURI)
+	if err != nil {
+		return apiResponse(http.StatusInternalServerError, ErrorResponse{
+			ErrorMessage: err.Error(),
+		})
+	}
+
+	csvFile, err := os.Open(csvOut)
+	if err != nil {
+		return apiResponse(http.StatusInternalServerError, ErrorResponse{
+			ErrorMessage: err.Error(),
+		})
+	}
+	defer csvFile.Close()
+
+	err = destinationHandler.Upload(context.Background(), csvFile) 
+	if err != nil {
+		return apiResponse(http.StatusInternalServerError, ErrorResponse{
+			ErrorMessage: err.Error(),
+		})
+	}
+
+	return apiResponse(http.StatusOK, struct{}{})
 }
 
 func apiResponse(status int, body interface{}) (*events.APIGatewayProxyResponse, error) {

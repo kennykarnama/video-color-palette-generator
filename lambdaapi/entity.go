@@ -12,3 +12,5 @@ type ColorPaletteGenerationRequest struct {
 type ErrorResponse struct {
 	ErrorMessage string `json:"errorMessage"`
 }
+
+type GenericResponse struct {}
