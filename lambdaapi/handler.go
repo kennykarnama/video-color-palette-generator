@@ -20,8 +20,12 @@ func Handler(req events.APIGatewayProxyRequest) (*events.APIGatewayProxyResponse
 	switch req.HTTPMethod {
 		case "GET":
 			return GetHandler(req)
+		case "POST":
+			return PostHandler(req)
 		default:
-			return nil, fmt.Errorf("unsupported http method")
+			return apiResponse(http.StatusInternalServerError, ErrorResponse{
+				ErrorMessage: fmt.Errorf("unsupported HTTP method").Error(),
+			})
 	}
 }
 
@@ -36,6 +40,7 @@ func PostHandler(req events.APIGatewayProxyRequest) (*events.APIGatewayProxyResp
 			ErrorMessage: err.Error(),
 		})
 	}
+
 	sourceProvider, err := source.GetProvider(paletteGenReq.SourceURL)
 	if err != nil {
 		return apiResponse(http.StatusInternalServerError, ErrorResponse{
@@ -49,7 +54,7 @@ func PostHandler(req events.APIGatewayProxyRequest) (*events.APIGatewayProxyResp
 			ErrorMessage: err.Error(),
 		})
 	}
-	csvOut := fmt.Sprintf("%v.csv", time.Now().UTC().Unix())
+	csvOut := fmt.Sprintf("/tmp/%v.csv", time.Now().UTC().Unix())
 	param := processor.Parameter{}
 	param.InputFile = localURI
 	param.InputSerial = paletteGenReq.SourceSerial
@@ -71,7 +76,6 @@ func PostHandler(req events.APIGatewayProxyRequest) (*events.APIGatewayProxyResp
 			ErrorMessage: err.Error(),
 		})
 	}
-
 	// upload to destination source
 	destinationHandler, err := destination.GetTarget(paletteGenReq.DestinationURI)
 	if err != nil {
@@ -79,7 +83,6 @@ func PostHandler(req events.APIGatewayProxyRequest) (*events.APIGatewayProxyResp
 			ErrorMessage: err.Error(),
 		})
 	}
-
 	csvFile, err := os.Open(csvOut)
 	if err != nil {
 		return apiResponse(http.StatusInternalServerError, ErrorResponse{
@@ -94,7 +97,6 @@ func PostHandler(req events.APIGatewayProxyRequest) (*events.APIGatewayProxyResp
 			ErrorMessage: err.Error(),
 		})
 	}
-
 	return apiResponse(http.StatusOK, struct{}{})
 }
 
