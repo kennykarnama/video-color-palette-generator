@@ -28,7 +28,7 @@ func main() {
 
 	if args.LambdaCmd != nil {
 		log.Printf("Running as lambda")
-		lambda.Start(lambdaapi.ColorPaletteHandler)
+		lambda.Start(lambdaapi.Handler)
 	}else {
 		log.Printf("Running as script")
 		err := processor.Run(*args.ScriptCmd)
