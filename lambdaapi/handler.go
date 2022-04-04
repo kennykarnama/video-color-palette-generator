@@ -23,7 +23,9 @@ func Handler(req events.APIGatewayProxyRequest) (*events.APIGatewayProxyResponse
 		case "POST":
 			return PostHandler(req)
 		default:
-			return apiResponse(http.StatusInternalServerError, fmt.Errorf("unsupported http method"))
+			return apiResponse(http.StatusInternalServerError, ErrorResponse{
+				ErrorMessage: fmt.Errorf("unsupported HTTP method").Error(),
+			})
 	}
 }
 
